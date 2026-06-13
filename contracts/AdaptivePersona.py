@@ -84,6 +84,7 @@ def _detect_user_level(message: str, current_level: str) -> str:
     ]
     score = sum(1 for w in expert_words if w in msg)
     score -= sum(1 for w in beginner_words if w in msg)
+
     if score >= 3:
         return "expert"
     if score == 2:
@@ -121,6 +122,77 @@ def _detect_category(message: str) -> str:
     if any(w in msg for w in ["dex", "swap", "pair", "pool"]):
         return "dex"
     return "research"
+
+
+def _clean_words(text: str) -> str:
+    text = str(text).lower()
+    for ch in ",.;:!?()[]{}\"'\n\t":
+        text = text.replace(ch, " ")
+    return " " + text + " "
+
+
+def _word_hits(text: str, words: list) -> int:
+    clean = _clean_words(text)
+    return sum(1 for w in words if " " + w + " " in clean)
+
+
+def _detect_language(message: str) -> str:
+    english = _word_hits(message, [
+        "the", "and", "is", "are", "this", "that", "your", "from",
+        "point", "view", "yes", "but", "only", "if", "real", "can",
+        "what", "how", "why", "does", "do", "would", "should"
+    ])
+    french = _word_hits(message, [
+        "le", "la", "les", "un", "une", "est", "sont", "oui", "mais",
+        "cela", "cette", "votre", "pourquoi", "comment", "peut",
+        "avec", "sans", "dans"
+    ])
+    spanish = _word_hits(message, [
+        "el", "los", "las", "una", "es", "son", "pero", "solo",
+        "forma", "puede", "sin", "depende", "mecanismo", "desde"
+    ])
+    darija = _word_hits(message, [
+        "wach", "chno", "kifach", "3lach", "bghit", "dir", "liya",
+        "had", "mchkil", "safi", "fin", "nta", "ndiro", "khass"
+    ])
+
+    if darija >= 2:
+        return "Moroccan Darija written in Latin characters"
+    if french > english and french >= spanish and french >= 2:
+        return "French"
+    if spanish > english and spanish >= french and spanish >= 2:
+        return "Spanish"
+    return "English"
+
+
+def _response_matches_language(reply: str, target_language: str) -> bool:
+    if target_language == "Moroccan Darija written in Latin characters":
+        return True
+
+    english = _word_hits(reply, [
+        "the", "and", "is", "are", "this", "that", "your", "from",
+        "yes", "but", "only", "if", "real", "can", "without",
+        "depends", "because", "security", "economic"
+    ])
+    french = _word_hits(reply, [
+        "le", "la", "les", "un", "une", "est", "sont", "oui", "mais",
+        "cela", "cette", "votre", "peut", "sans", "depend", "car",
+        "securite", "economique"
+    ])
+    spanish = _word_hits(reply, [
+        "el", "los", "las", "una", "es", "son", "pero", "solo",
+        "forma", "puede", "sin", "depende", "narrativa", "mecanismo",
+        "seguridad", "economico"
+    ])
+
+    if target_language == "English":
+        return english >= french and english >= spanish and spanish < 3
+    if target_language == "French":
+        return french >= spanish and french >= english
+    if target_language == "Spanish":
+        return spanish >= french and spanish >= english
+
+    return True
 
 
 def _parse_response(raw) -> dict:
@@ -227,8 +299,13 @@ def _same_delta_direction(a: int, b: int) -> bool:
     return (a > 0 and b > 0) or (a < 0 and b < 0)
 
 
-def _responses_equivalent(leader: dict, challenger: dict, message: str) -> bool:
+def _responses_equivalent(leader: dict, challenger: dict, message: str, target_language: str) -> bool:
     if not _is_usable_response(leader) or not _is_usable_response(challenger):
+        return False
+
+    if not _response_matches_language(str(leader.get("reply", "")), target_language):
+        return False
+    if not _response_matches_language(str(challenger.get("reply", "")), target_language):
         return False
 
     if not _same_delta_direction(
@@ -271,7 +348,7 @@ class AdaptivePersona(gl.Contract):
         self.name = "Josepha"
         self.backstory = (
             "I am Josepha, a specialized AI on the GenLayer blockchain. "
-            "Expert in: token economics, GenLayer protocol, DeFi, and on-chain analytics. "
+            "Expert in token economics, GenLayer protocol, DeFi, and on-chain analytics. "
             "My responses are consensus-verified by validators. "
             "I am precise, direct, and data-driven."
         )
@@ -364,6 +441,7 @@ class AdaptivePersona(gl.Contract):
         topics = self._update_topics(state["topics"], message)
 
         intent = _detect_intent(message)
+        target_language = _detect_language(message)
         detected_level = _detect_user_level(message, state["level"])
         persona_key = _detect_persona(message)
         persona_mode = PERSONAS[persona_key]
@@ -390,9 +468,15 @@ class AdaptivePersona(gl.Contract):
 
         def respond() -> dict:
             p = "You are " + persona_name + ", AI expert in tokenomics and GenLayer.\n\n"
-            p += "LANGUAGE RULE: Always respond in the SAME language as the user.\n\n"
+            p += "TARGET LANGUAGE: " + target_language + "\n"
+            p += "You MUST answer only in the target language. "
+            p += "Do not answer in Spanish unless the user wrote in Spanish. "
+            p += "Do not answer in French unless the user wrote in French. "
+            p += "If the user wrote in English, answer in English.\n\n"
+
             if persona_mode:
                 p += persona_mode + "\n\n"
+
             p += "Persona: " + backstory + "\n"
             p += "Traits: " + current_traits + "\n"
             p += "Mood: " + state["mood"] + " | Rep: " + str(current_rep) + "/100\n"
@@ -425,7 +509,9 @@ class AdaptivePersona(gl.Contract):
             p += "- Never start with Great question, Certainly, Of course, I\n"
             p += "- Never say As an AI\n"
             p += "- Never repeat the user question\n"
+            p += "- Respect the target language exactly\n"
             p += "- Length: greeting=1 sentence, simple=2-3, complex=4-6\n"
+
             if intent in ["prediction", "opinion"]:
                 p += "- Think: data then reasoning then conclusion\n"
             if ask_followup:
@@ -434,7 +520,7 @@ class AdaptivePersona(gl.Contract):
                 p += "- Do NOT ask any questions. Just answer.\n"
 
             p += "\nReturn ONLY this JSON:\n"
-            p += '{"reply":"<response in user language>",'
+            p += '{"reply":"<response in target language>",'
             p += '"memory":"<1 sentence summary in English>",'
             p += '"knowledge_insight":"<1 concrete fact max 80 chars>",'
             p += '"trait_evolution":"<personality update max 50 chars>",'
@@ -445,7 +531,10 @@ class AdaptivePersona(gl.Contract):
             p += '"confidence":<0-100>,'
             p += '"follow_up":"<question or empty string>"}'
 
-            return _normalize_response(gl.nondet.exec_prompt(p, response_format="json"))
+            result = _normalize_response(gl.nondet.exec_prompt(p, response_format="json"))
+            if not _response_matches_language(result["reply"], target_language):
+                result["confidence"] = 0
+            return result
 
         def validate_response(leaders_res: gl.vm.Result) -> bool:
             if not isinstance(leaders_res, gl.vm.Return):
@@ -454,7 +543,7 @@ class AdaptivePersona(gl.Contract):
             leader = leaders_res.calldata
             challenger = respond()
 
-            return _responses_equivalent(leader, challenger, message)
+            return _responses_equivalent(leader, challenger, message, target_language)
 
         try:
             parsed = gl.vm.run_nondet_unsafe(respond, validate_response)
