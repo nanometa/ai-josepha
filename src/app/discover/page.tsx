@@ -118,7 +118,7 @@ export default function DiscoverPage() {
     },
     {
       q: "What is the contract address?",
-      a: "You can find her at 0x61b25b67bFD1A65962C4000733dc5311b242f010. You can verify the code and every single transaction on the Genlayer Studio Network (Chain ID: 61999)."
+      a: "You can find her at 0x38f52c170359398484aaC84c4F25F94BEabFE931. You can verify the code and every single transaction on the Genlayer Studio Network (Chain ID: 61999)."
     },
     {
       q: "Can Josepha access real-time data?",
@@ -194,7 +194,7 @@ export default function DiscoverPage() {
               <div className="space-y-3">
                 <span className="text-[10px] uppercase tracking-[0.2em] text-white/30 font-sans">Contract Address</span>
                 <a 
-                  href="https://explorer-studio.genlayer.com/address/0x61b25b67bFD1A65962C4000733dc5311b242f010" 
+                  href="https://explorer-studio.genlayer.com/address/0x38f52c170359398484aaC84c4F25F94BEabFE931" 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 text-white/80 hover:text-white transition-colors group"
@@ -203,7 +203,7 @@ export default function DiscoverPage() {
                     0x6D867b5a...8249
                   </code>
                   <code className="font-mono text-sm hidden sm:block">
-                    0x61b25b67bFD1A65962C4000733dc5311b242f010
+                    0x38f52c170359398484aaC84c4F25F94BEabFE931
                   </code>
                   <ExternalLink className="w-4 h-4 opacity-40 group-hover:opacity-100 transition-opacity" />
                 </a>
