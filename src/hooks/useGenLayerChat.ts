@@ -8,7 +8,7 @@ import { TransactionStatus } from 'genlayer-js/types';
 // ── Contract address from environment ──
 const getContractAddress = (): `0x${string}` => {
   const envAddr = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
-  const fallback = '0x6D867b5aebe20f54254F6fcC7d7C3c63DDE98249';
+  const fallback = '0x08ce97aFcd8e37E486389Cc25ef0f65f59F55a5d';
   
   if (!envAddr || envAddr === 'undefined' || !envAddr.startsWith('0x')) {
     return fallback as `0x${string}`;
@@ -18,7 +18,7 @@ const getContractAddress = (): `0x${string}` => {
 
 const CONTRACT_ADDRESS = getContractAddress();
 
-const CONTRACT_VERSION = 'v14'; // Force cache clear for new contract address
+const CONTRACT_VERSION = 'v15'; // Force cache clear for new contract address
 
 
 export interface ChatMessage {
@@ -113,14 +113,14 @@ export function useGenLayerChat() {
   // ── loadState: read-only, no account needed ──
   const loadState = useCallback(async () => {
     try {
-      if (!CONTRACT_ADDRESS) return;
+      if (!CONTRACT_ADDRESS || !address) return;
 
       const readClient = createClient({ chain: studionet });
 
       const result = await readClient.readContract({
         address: CONTRACT_ADDRESS,
         functionName: 'get_full_state',
-        args: [],
+        args: [address],
       });
 
       const state = JSON.parse(result as string);
@@ -142,7 +142,7 @@ export function useGenLayerChat() {
     } finally {
       setIsFetching(false);
     }
-  }, []);
+  }, [address]);
 
   const waitForAccepted = async (hash: string): Promise<void> => {
     const maxAttempts = 150; // 5 minutes max (150 x 2 seconds)
@@ -282,7 +282,7 @@ export function useGenLayerChat() {
       const reply = await readClient.readContract({
         address: CONTRACT_ADDRESS,
         functionName: 'get_reply',
-        args: [],
+        args: [address],
       });
 
       setTxStep(4);

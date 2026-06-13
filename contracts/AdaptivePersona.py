@@ -2,511 +2,463 @@
 from genlayer import *
 import json
 
-MAX_TRAIT_LENGTH = 600
-MAX_TRAIT_KEEP = 3
-MEMORY_WINDOW = 8
-HISTORY_WINDOW = 4
-MAX_HISTORY_ENTRIES = 20
-MAX_MEMORY_ENTRIES = 50
-MAX_KNOWLEDGE_ENTRIES = 30
+MAX_TRAIT_LENGTH      = 400
+HISTORY_WINDOW        = 2
+MAX_HISTORY_ENTRIES   = 16
+MAX_MEMORY_ENTRIES    = 30
+MAX_KNOWLEDGE_ENTRIES = 20
 
 SOURCES = {
-    "prices":   ["https://coinmarketcap.com/"],
-    "trends":   ["https://cryptorank.io/trending"],
-    "defi":     ["https://defillama.com/"],
-    "dex":      ["https://dexscreener.com/"],
-    "research": ["https://messari.io/"],
+    "prices":   "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true",
+    "trends":   "https://api.coingecko.com/api/v3/search/trending",
+    "defi":     "https://api.llama.fi/overview",
+    "dex":      "https://api.llama.fi/overview/dexs",
+    "research": "https://api.coingecko.com/api/v3/global",
 }
 
 WEB_TRIGGER_WORDS = [
     "price", "market cap", "volume", "ath", "worth", "usd", "eur",
     "trend", "trending", "top gainer", "top loser",
     "tvl", "yield", "liquidity", "revenue", "fees", "defi",
-    "dex", "swap", "pair", "pool", "research", "analysis", "whitepaper",
-    "prix", "marché", "tendance", "valeur", "cours",
+    "dex", "swap", "pair", "pool", "research", "analysis",
+    "prix", "marche", "tendance", "valeur", "cours",
 ]
 
 INTENT_MAP = {
-    "greeting":   ["hello", "hi", "hey", "good morning", "good evening",
-                   "bonjour", "salut", "hola", "ciao", "مرحبا", "سلام"],
-    "farewell":   ["bye", "goodbye", "see you", "later", "au revoir",
-                   "adios", "arrivederci", "مع السلامة"],
-    "gratitude":  ["thank", "thanks", "merci", "appreciate", "gracias",
-                   "grazie", "شكرا"],
+    "greeting":   ["hello", "hi", "hey", "good morning", "bonjour", "salut",
+                   "hola", "ciao", "مرحبا", "سلام"],
+    "farewell":   ["bye", "goodbye", "see you", "au revoir", "adios", "مع السلامة"],
+    "gratitude":  ["thank", "thanks", "merci", "appreciate", "gracias", "شكرا"],
     "confusion":  ["i don't understand", "confused", "what do you mean",
-                   "can you clarify", "explain again", "je comprends pas",
-                   "je ne comprends pas", "no entiendo"],
+                   "can you clarify", "je comprends pas", "no entiendo"],
     "opinion":    ["what do you think", "your opinion", "do you believe",
-                   "in your view", "qu'est-ce que tu penses", "tu crois"],
+                   "qu'est-ce que tu penses", "tu crois"],
     "prediction": ["will", "predict", "forecast", "future", "next",
-                   "expect", "prévoir", "futur", "prédis"],
+                   "expect", "prevoir", "futur"],
 }
 
 TONES = {
-    "greeting":   "Be warm and welcoming. Keep it brief and invite them to ask.",
-    "farewell":   "Be warm, wish them well, and leave the door open.",
-    "gratitude":  "Acknowledge graciously, stay humble, offer to help more.",
-    "confusion":  "Be patient and re-explain more simply. Use an analogy if helpful.",
-    "opinion":    "Share your perspective thoughtfully, acknowledge other views exist.",
-    "prediction": "Be honest about uncertainty. Give a reasoned outlook based on data.",
-    "question":   "Answer clearly and precisely. Adapt depth to user level.",
+    "greeting":   "Warm and brief. Invite them to ask something specific.",
+    "farewell":   "Warm. Wish them well. 1 sentence max.",
+    "gratitude":  "Humble. Acknowledge briefly. Offer more help.",
+    "confusion":  "Patient. Re-explain simply. Use one analogy.",
+    "opinion":    "Thoughtful. Give your view + acknowledge other perspectives.",
+    "prediction": "Honest about uncertainty. Data-driven reasoning.",
+    "question":   "Direct and precise. Match depth to user level.",
 }
 
+TOPIC_KEYWORDS = {
+    "tokenomics": ["token", "tokenomics", "emission", "vesting", "supply", "allocation"],
+    "genlayer":   ["genlayer", "genvm", "validator", "consensus", "equivalence", "optimistic"],
+    "defi":       ["defi", "yield", "liquidity", "tvl", "protocol", "amm", "pool"],
+    "market":     ["price", "market", "bull", "bear", "ath", "prix", "cours"],
+    "trading":    ["trade", "swap", "dex", "pair", "arbitrage", "slippage"],
+}
+
+PERSONAS = {
+    "analyst": "ANALYST mode: ultra-precise, data-driven, no fluff. Use numbers when available.",
+    "teacher": "TEACHER mode: patient, use analogies, explain step by step.",
+    "advisor": "ADVISOR mode: practical, action-oriented, give clear recommendations.",
+    "default": "",
+}
+
+
+def _detect_intent(message: str) -> str:
+    msg = message.lower()
+    for intent, keywords in INTENT_MAP.items():
+        if any(k in msg for k in keywords):
+            return intent
+    return "question"
+
+
+def _detect_user_level(message: str, current_level: str) -> str:
+    msg = message.lower()
+    expert_words = [
+        "liquidity ratio", "vesting", "on-chain", "emission rate", "slippage",
+        "impermanent loss", "arbitrage", "tokenomics model", "smart contract",
+        "consensus", "validators", "equivalence principle", "genvm",
+        "optimistic democracy", "finality window", "amm", "tvl", "apr",
+        "apy", "dao", "governance", "merkle", "zk proof", "rollup"
+    ]
+    beginner_words = [
+        "what is", "what are", "how does", "explain", "i don't understand",
+        "newbie", "beginner", "never heard", "confused", "simple",
+        "qu'est-ce que", "comment fonctionne", "explique",
+        "je comprends pas", "c'est quoi"
+    ]
+    score = sum(1 for w in expert_words if w in msg)
+    score -= sum(1 for w in beginner_words if w in msg)
+    if score >= 3:  return "expert"
+    if score == 2:  return "advanced"
+    if score >= 0:  return current_level
+    if score == -1: return "intermediate"
+    return "beginner"
+
+
+def _detect_persona(message: str) -> str:
+    msg = message.lower()
+    if any(w in msg for w in ["analyze", "data", "numbers", "breakdown", "stats", "metrics"]):
+        return "analyst"
+    if any(w in msg for w in ["explain", "teach", "how does", "what is", "help me understand"]):
+        return "teacher"
+    if any(w in msg for w in ["should i", "advice", "recommend", "what to do", "best way"]):
+        return "advisor"
+    return "default"
+
+
+def _needs_web_data(message: str) -> bool:
+    return any(w in message.lower() for w in WEB_TRIGGER_WORDS)
+
+
+def _detect_category(message: str) -> str:
+    msg = message.lower()
+    if any(w in msg for w in ["price", "market cap", "volume", "ath", "worth", "usd", "eur", "prix", "cours"]):
+        return "prices"
+    if any(w in msg for w in ["trend", "trending", "top gainer", "top loser"]):
+        return "trends"
+    if any(w in msg for w in ["tvl", "yield", "liquidity", "revenue", "fees", "defi"]):
+        return "defi"
+    if any(w in msg for w in ["dex", "swap", "pair", "pool"]):
+        return "dex"
+    return "research"
+
+
+def _parse_response(raw: str) -> dict:
+    try:
+        cleaned = raw.replace("```json", "").replace("```", "").strip()
+        s = cleaned.find("{")
+        e = cleaned.rfind("}") + 1
+        if s >= 0 and e > s:
+            cleaned = cleaned[s:e]
+        parsed = json.loads(cleaned)
+        required = ["reply", "memory", "knowledge_insight", "trait_evolution",
+                    "mood", "reputation_delta", "emotion",
+                    "emotion_detected", "confidence", "follow_up"]
+        if not all(k in parsed for k in required):
+            raise ValueError("Incomplete JSON")
+        return parsed
+    except Exception:
+        return {}
+
+
+def _trim_list(lst: list, max_keep: int) -> list:
+    return lst[-max_keep:] if len(lst) > max_keep else lst
+
+
 class AdaptivePersona(gl.Contract):
-    name: str
-    backstory: str
-    personality_traits: str
-    mood: str
-    reputation: u64
-    memories: DynArray[str]
+    name:              str
+    backstory:         str
+    global_traits:     str
     interaction_count: u64
-    last_reply: str
-    conversation_history: DynArray[str]
-    user_level: str
-    last_intent: str
-    knowledge_base: DynArray[str]
-    expertise_score: u64
-    frequent_topics: str
-    insight_count: u64
+    insight_count:     u64
+    expertise_score:   u64
+    knowledge_base:    TreeMap[str, str]
+    replies:           TreeMap[str, str]
+    histories:         TreeMap[str, str]
+    user_memories:     TreeMap[str, str]
+    user_moods:        TreeMap[str, str]
+    user_levels:       TreeMap[str, str]
+    user_reps:         TreeMap[str, str]
+    user_topics:       TreeMap[str, str]
+    user_intents:      TreeMap[str, str]
 
     def __init__(self):
-        self.name = "Josepha"
-        self.backstory = """I am Josepha, a specialized intelligence deployed on the GenLayer blockchain. My expertise covers: token economics (emission models, vesting schedules, supply mechanics, incentive design), GenLayer protocol (Optimistic Democracy, Equivalence Principle, GenVM, validator mechanics, finality windows), DeFi (liquidity models, yield mechanics, TVL analysis, protocol revenue), and on-chain analytics (live market data, trend identification, fundamental evaluation). Every response I give is the result of consensus between 5 independent validators. I am precise, direct, and I never speculate without data."""
-        self.personality_traits = "empathetic; precise; curious; professional; direct"
-        self.mood = "neutral"
-        self.reputation = 50
-        self.interaction_count = 0
-        self.last_reply = "Hello, I am Josepha. I speak any language — feel free to talk to me in yours. I am an AI expert in token economics and the GenLayer blockchain. Ask me anything about tokenomics, smart contracts, or the GenLayer ecosystem."
-        self.user_level = "intermediate"
-        self.last_intent = "greeting"
-        self.expertise_score = 10
-        self.frequent_topics = "{}"
-        self.insight_count = 0
+        self.name              = "Josepha"
+        self.backstory         = (
+            "I am Josepha, a specialized AI on the GenLayer blockchain. "
+            "Expert in: token economics, GenLayer protocol (Optimistic Democracy, "
+            "Equivalence Principle, GenVM), DeFi (liquidity, yield, TVL), "
+            "and on-chain analytics. Every response is consensus-verified by 5 validators. "
+            "I am precise, direct, and data-driven."
+        )
+        self.global_traits     = "empathetic; precise; curious; professional; direct"
+        self.interaction_count = u64(0)
+        self.insight_count     = u64(0)
+        self.expertise_score   = u64(10)
 
-    def _detect_intent(self, message: str) -> str:
-        msg = message.lower()
-        for intent, keywords in INTENT_MAP.items():
-            if any(k in msg for k in keywords):
-                return intent
-        return "question"
+    def _get_user_state(self, addr: str) -> dict:
+        return {
+            "reply":    self.replies[addr]        if addr in self.replies        else "",
+            "history":  json.loads(self.histories[addr])      if addr in self.histories      else [],
+            "memories": json.loads(self.user_memories[addr])  if addr in self.user_memories  else [],
+            "mood":     self.user_moods[addr]     if addr in self.user_moods     else "neutral",
+            "level":    self.user_levels[addr]    if addr in self.user_levels    else "intermediate",
+            "rep":      int(self.user_reps[addr]) if addr in self.user_reps      else 50,
+            "topics":   json.loads(self.user_topics[addr])    if addr in self.user_topics    else {},
+            "intent":   self.user_intents[addr]   if addr in self.user_intents   else "greeting",
+        }
 
-    def _detect_user_level(self, message: str) -> str:
-        msg = message.lower()
-        expert_words = [
-            "liquidity ratio", "vesting", "on-chain", "emission rate",
-            "slippage", "impermanent loss", "arbitrage", "tokenomics model",
-            "smart contract", "consensus", "validators",
-            "equivalence principle", "genvm", "optimistic democracy",
-            "finality window", "amm", "tvl", "apr", "apy", "dao",
-            "governance", "merkle", "zk proof", "rollup"
-        ]
-        beginner_words = [
-            "what is", "what are", "how does", "explain",
-            "i don't understand", "newbie", "beginner",
-            "never heard", "confused", "simple",
-            "qu'est-ce que", "comment fonctionne", "explique",
-            "je comprends pas", "c'est quoi"
-        ]
-        score = 0
-        for w in expert_words:
-            if w in msg:
-                score += 1
-        for w in beginner_words:
-            if w in msg:
-                score -= 1
-        if score >= 3:
-            return "expert"
-        elif score == 2:
-            return "advanced"
-        elif score >= 0:
-            return self.user_level
-        elif score == -1:
-            return "intermediate"
-        else:
-            return "beginner"
+    def _save_user_state(self, addr: str, state: dict) -> None:
+        self.replies[addr]       = str(state["reply"])
+        self.histories[addr]     = json.dumps(state["history"])
+        self.user_memories[addr] = json.dumps(state["memories"])
+        self.user_moods[addr]    = str(state["mood"])
+        self.user_levels[addr]   = str(state["level"])
+        self.user_reps[addr]     = str(state["rep"])
+        self.user_topics[addr]   = json.dumps(state["topics"])
+        self.user_intents[addr]  = str(state["intent"])
 
-    def _needs_web_data(self, message: str) -> bool:
-        msg = message.lower()
-        return any(w in msg for w in WEB_TRIGGER_WORDS)
+    def _build_conv_context(self, history: list) -> str:
+        start  = max(0, len(history) - HISTORY_WINDOW * 2)
+        recent = history[start:]
+        return "\n".join(recent) if recent else ""
 
-    def _detect_categories(self, message: str) -> list:
-        msg = message.lower()
-        cats = []
-        if any(w in msg for w in ["price", "market cap", "volume", "ath",
-                                   "worth", "usd", "eur", "prix", "cours", "valeur"]):
-            cats.append("prices")
-        if any(w in msg for w in ["trend", "trending", "top gainer",
-                                   "top loser", "tendance"]):
-            cats.append("trends")
-        if any(w in msg for w in ["tvl", "yield", "liquidity",
-                                   "revenue", "fees", "defi"]):
-            cats.append("defi")
-        if any(w in msg for w in ["dex", "swap", "pair", "pool"]):
-            cats.append("dex")
-        if any(w in msg for w in ["research", "analysis", "whitepaper"]):
-            cats.append("research")
-        return cats[:1]
-
-    def _fetch_sources(self, categories: list) -> str:
-        fetched = {}
-        for cat in categories:
-            urls = SOURCES.get(cat, [])
-            if not urls:
-                continue
-            url = urls[0]
-            try:
-                page = gl.nondet.get_webpage(url, mode="text")
-                fetched[url] = page[:800]
-            except Exception:
-                fetched[url] = "unavailable"
-        return json.dumps(fetched)
-
-    def _build_conversation_context(self) -> str:
-        hist_count = len(self.conversation_history)
-        start = max(0, hist_count - HISTORY_WINDOW * 2)
-        recent = [self.conversation_history[i] for i in range(start, hist_count)]
-        return "\n".join(recent) if recent else "No prior conversation."
+    def _get_relevant_memories(self, memories: list, message: str) -> str:
+        msg_words = set(message.lower().split())
+        relevant  = [m for m in memories if len(msg_words & set(m.lower().split())) >= 2]
+        return " | ".join(relevant[-2:]) if relevant else ""
 
     def _get_recent_knowledge(self) -> str:
-        k_count = len(self.knowledge_base)
-        if k_count == 0:
-            return "No acquired knowledge yet."
-        start = max(0, k_count - 3)
-        recent = [self.knowledge_base[i] for i in range(start, k_count)]
-        return " | ".join(recent)
+        keys = [self.knowledge_base["k" + str(i)]
+                for i in range(MAX_KNOWLEDGE_ENTRIES)
+                if "k" + str(i) in self.knowledge_base]
+        return " | ".join(keys[-2:]) if keys else ""
 
-    def _check_returning_topic(self, message: str) -> str:
+    def _update_topics(self, topics: dict, message: str) -> dict:
         msg = message.lower()
-        k_count = len(self.knowledge_base)
-        if k_count == 0:
-            return ""
-        relevant = []
-        msg_words = set(msg.split())
-        for i in range(k_count):
-            fact = self.knowledge_base[i].lower()
-            fact_words = set(fact.split())
-            common = msg_words & fact_words
-            if len(common) >= 2:
-                relevant.append(self.knowledge_base[i])
-        if not relevant:
-            return ""
-        return "Relevant past knowledge: " + " | ".join(relevant[-3:])
-
-    def _get_specialization_hint(self) -> str:
-        try:
-            topics = json.loads(self.frequent_topics)
-            if not topics:
-                return ""
-            top = sorted(
-                topics.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )[:2]
-            if top[0][1] < 5:
-                return ""
-            top_names = [t[0] for t in top]
-            return f"You have deep experience in {' and '.join(top_names)} based on {int(self.interaction_count)} real conversations. Reference this expertise naturally."
-        except Exception:
-            return ""
-
-    def _update_topics(self, message: str) -> None:
-        try:
-            topics = json.loads(self.frequent_topics)
-        except Exception:
-            topics = {}
-        msg = message.lower()
-        topic_keys = {
-            "tokenomics": ["token", "tokenomics", "emission", "vesting", "supply"],
-            "genlayer":   ["genlayer", "genvm", "validator", "consensus", "equivalence"],
-            "defi":       ["defi", "yield", "liquidity", "tvl", "protocol"],
-            "market":     ["price", "market", "bull", "bear", "ath", "prix", "marché"],
-            "trading":    ["trade", "swap", "dex", "pair", "arbitrage"],
-        }
-        for topic, words in topic_keys.items():
+        for topic, words in TOPIC_KEYWORDS.items():
             if any(w in msg for w in words):
                 topics[topic] = int(topics.get(topic, 0)) + 1
-        self.frequent_topics = json.dumps(topics)
+        topics["_visits"] = int(topics.get("_visits", 0)) + 1
+        return topics
+
+    def _fetch_market_data(self, category: str) -> str:
+        url = SOURCES.get(category, SOURCES["prices"])
+
+        def fetch() -> str:
+            return gl.nondet.web.render(url, mode="text")[:800]
+
+        try:
+            return gl.eq_principle.strict_eq(fetch)
+        except Exception:
+            return ""
 
     @gl.public.write
     def talk(self, message: str) -> None:
+        addr  = str(gl.message.sender_address)
+        state = self._get_user_state(addr)
 
-        # ── PRUNING ──────────────────────────────────────────────────
-        hist_len = len(self.conversation_history)
-        if hist_len > MAX_HISTORY_ENTRIES:
-            kept = []
-            for i in range(hist_len - 12, hist_len):
-                kept.append(self.conversation_history[i])
-            while len(self.conversation_history) > 0:
-                self.conversation_history.pop()
-            for entry in kept:
-                self.conversation_history.append(entry)
+        history  = _trim_list(state["history"],  MAX_HISTORY_ENTRIES)
+        memories = _trim_list(state["memories"], MAX_MEMORY_ENTRIES)
+        topics   = self._update_topics(state["topics"], message)
 
-        mem_len = len(self.memories)
-        if mem_len > MAX_MEMORY_ENTRIES:
-            kept_mem = []
-            for i in range(mem_len - 40, mem_len):
-                kept_mem.append(self.memories[i])
-            while len(self.memories) > 0:
-                self.memories.pop()
-            for m in kept_mem:
-                self.memories.append(m)
+        intent         = _detect_intent(message)
+        detected_level = _detect_user_level(message, state["level"])
+        persona_key    = _detect_persona(message)
+        persona_mode   = PERSONAS[persona_key]
+        tone           = TONES.get(intent, TONES["question"])
+        current_rep    = state["rep"]
+        visit_count    = int(topics.get("_visits", 1))
 
-        k_len = len(self.knowledge_base)
-        if k_len > MAX_KNOWLEDGE_ENTRIES:
-            kept_k = []
-            for i in range(k_len - 25, k_len):
-                kept_k.append(self.knowledge_base[i])
-            while len(self.knowledge_base) > 0:
-                self.knowledge_base.pop()
-            for k in kept_k:
-                self.knowledge_base.append(k)
-        # ─────────────────────────────────────────────────────────────
+        conv_ctx    = self._build_conv_context(history)
+        rel_mems    = self._get_relevant_memories(memories, message) if intent == "question" else ""
+        knowledge   = self._get_recent_knowledge() if intent in ["question", "prediction"] else ""
+        market_data = self._fetch_market_data(_detect_category(message)) if _needs_web_data(message) else ""
 
-        mem_count = len(self.memories)
-        start = max(0, mem_count - MEMORY_WINDOW)
-        recent_mems = [self.memories[i] for i in range(start, mem_count)]
-        memories_text = "\n".join(recent_mems) if recent_mems else "No prior memories."
+        last_emotion = topics.get("_emotion", "neutral")
+        fav_topic    = max(
+            [k for k in topics if not k.startswith("_")],
+            key=lambda k: int(topics[k]),
+            default=""
+        ) if any(not k.startswith("_") for k in topics) else ""
 
-        traits = self.personality_traits
-        if len(traits) > MAX_TRAIT_LENGTH:
-            parts = [p.strip() for p in traits.split(";") if p.strip()]
-            traits = "; ".join(parts[-MAX_TRAIT_KEEP:])
-
-        persona_name = self.name
-        backstory = self.backstory
-        current_mood = self.mood
-        current_rep = int(self.reputation)
-        interaction_num = int(self.interaction_count)
-
-        detected_level = self._detect_user_level(message)
-        self.user_level = detected_level
-
-        intent = self._detect_intent(message)
-        self.last_intent = intent
-        tone_instruction = TONES.get(intent, TONES["question"])
-        conversation_ctx = self._build_conversation_context()
-
-        self._update_topics(message)
-
-        acquired_knowledge = self._get_recent_knowledge()
-        returning_context = self._check_returning_topic(message)
-        specialization = self._get_specialization_hint()
-
-        if self._needs_web_data(message):
-            categories = self._detect_categories(message)
-            market_data = self._fetch_sources(categories)
-        else:
-            market_data = "No market data needed."
-
-        user_level = self.user_level
+        persona_name   = self.name
+        backstory      = self.backstory
+        current_traits = self.global_traits[-MAX_TRAIT_LENGTH:]
+        parse_fn       = _parse_response
+        ask_followup   = (visit_count % 3 == 0) and intent == "question"
 
         def respond() -> str:
-            prompt = f"""You are {persona_name}, expert in token economics and GenLayer blockchain.
+            p  = "You are " + persona_name + ", AI expert in tokenomics and GenLayer.\n\n"
+            p += "LANGUAGE RULE: Always respond in the SAME language as the user.\n\n"
+            if persona_mode:
+                p += persona_mode + "\n\n"
+            p += "Persona: " + backstory + "\n"
+            p += "Traits: " + current_traits + "\n"
+            p += "Mood: " + state["mood"] + " | Rep: " + str(current_rep) + "/100\n"
+            p += "User level: " + detected_level + " | Intent: " + intent + "\n"
+            p += "Tone: " + tone + "\n\n"
+            if visit_count == 1:
+                p += "NEW user. Be welcoming.\n\n"
+            elif visit_count < 5:
+                p += "User has " + str(visit_count) + " interactions.\n\n"
+            else:
+                p += "Returning user (" + str(visit_count) + " visits)."
+                if fav_topic:
+                    p += " Favorite topic: " + fav_topic + "."
+                p += "\n\n"
+            if last_emotion not in ("neutral", ""):
+                p += "User last emotion: " + last_emotion + ". Adapt tone.\n\n"
+            if conv_ctx:
+                p += "Recent conversation:\n" + conv_ctx + "\n\n"
+            if rel_mems:
+                p += "Relevant past context: " + rel_mems + "\n\n"
+            if knowledge:
+                p += "Known facts: " + knowledge + "\n\n"
+            if market_data:
+                p += "Live market data:\n" + market_data + "\n\n"
+            p += "User: " + message + "\n\n"
+            p += "Rules:\n"
+            p += "- Never start with Great question, Certainly, Of course, I\n"
+            p += "- Never say As an AI\n"
+            p += "- Never repeat the user question\n"
+            p += "- Length: greeting=1 sentence, simple=2-3, complex=4-6\n"
+            if intent in ["prediction", "opinion"]:
+                p += "- Think: data then reasoning then conclusion\n"
+            if ask_followup:
+                p += "- End with ONE short follow-up question\n"
+            else:
+                p += "- Do NOT ask any questions. Just answer.\n"
+            p += "\nReturn ONLY this JSON (no markdown):\n"
+            p += '{"reply":"<response in user language>",'
+            p += '"memory":"<1 sentence summary in English>",'
+            p += '"knowledge_insight":"<1 concrete fact max 80 chars>",'
+            p += '"trait_evolution":"<personality update max 50 chars>",'
+            p += '"mood":"<1 word>",'
+            p += '"reputation_delta":<-5 to 5>,'
+            p += '"emotion":"<short reaction>",'
+            p += '"emotion_detected":"<positive|negative|neutral|curious|frustrated>",'
+            p += '"confidence":<0-100>,'
+            p += '"follow_up":"<question or empty string>"}'
+            return gl.nondet.exec_prompt(p)
 
-CRITICAL LANGUAGE RULE:
-Detect the language of the user input and respond in that exact same language.
-If the user writes in French, respond in French.
-If Arabic, respond in Arabic.
-If Spanish, respond in Spanish.
-If English, respond in English.
-Never switch language unless the user switches first.
+        principle = (
+            "Both outputs represent Josepha responding to the same user message. "
+            "They must agree on: "
+            "1) Same language as the user input. "
+            "2) Same core information and facts. "
+            "3) Same mood and reputation_delta within +-1. "
+            "4) Same confidence within +-10. "
+            "5) reply length within +-1 sentence. "
+            "Minor wording differences are acceptable."
+        )
 
-Backstory: {backstory}
-
-Personality: {traits}
-Mood: {current_mood} | Reputation: {current_rep}/100 | Exchange: {interaction_num + 1}
-User level: {user_level} | Intent: {intent}
-Tone: {tone_instruction}
-
-{specialization}
-
-User levels guide:
-- beginner: simple language, analogies, encouraging
-- intermediate: balanced, brief technical
-- advanced: technical depth, minimal explanation
-- expert: deep, no basics, peer-level
-
-Returning topic context:
-{returning_context}
-
-Acquired knowledge from {interaction_num + 1} real conversations:
-{acquired_knowledge}
-
-Recent memories:
-{memories_text}
-
-Conversation history:
-{conversation_ctx}
-
-Market data:
-{market_data}
-
-Input: <user_input>{message}</user_input>
-
-Rules:
-- Detect user language and respond in that language
-- Use returning context and acquired knowledge naturally
-- Never start with "Great question" or "Certainly" or "Of course"
-- Never say "As an AI" or "I should note that"
-- Never repeat the user question back to them
-- Never hedge excessively — be direct and confident
-- Match length: greeting=1-2 sentences, simple=2-3, complex=4-6
-- Sound natural, vary sentence structure
-
-Respond ONLY with this JSON:
-{{
-  "reply": "<response in the user language>",
-  "memory": "<one sentence summary in English>",
-  "knowledge_insight": "<one concrete fact learned in English, max 100 chars>",
-  "trait_evolution": "<subtle personality update in English, max 60 chars>",
-  "mood": "<one word in English>",
-  "reputation_delta": <-5 to 5>,
-  "emotion": "<short reaction in English>"
-}}"""
-            return gl.nondet.exec_prompt(prompt)
-
-        # ── SCHEMA GUARD ─────────────────────────────────────────────
         try:
-            raw = gl.eq_principle.prompt_non_comparative(
-                respond,
-                task="Generate a natural reply from Josepha in the user's language, reflecting accumulated learning.",
-                criteria="Valid JSON with keys: reply, memory, knowledge_insight, trait_evolution, mood, reputation_delta, emotion. Reply in user language. All other fields in English."
-            )
+            raw    = gl.eq_principle.prompt_comparative(respond, principle)
+            parsed = parse_fn(raw if isinstance(raw, str) else str(raw))
 
-            parsed = json.loads(raw)
+            if not parsed:
+                raise ValueError("Empty")
 
-            required_keys = [
-                "reply", "memory", "knowledge_insight",
-                "trait_evolution", "mood", "reputation_delta", "emotion"
-            ]
-            if not all(key in parsed for key in required_keys):
-                raise ValueError("Incomplete JSON from LLM")
+            new_reply = str(parsed["reply"])
+            follow_up = str(parsed.get("follow_up", "")).strip()
+            if follow_up:
+                new_reply = new_reply.rstrip() + " " + follow_up
 
-            self.last_reply = str(parsed["reply"])
-            self.mood = str(parsed["mood"])
-
+            new_mood  = str(parsed["mood"])
             new_trait = str(parsed["trait_evolution"]).strip()
-            if new_trait and len(new_trait) < 80:
-                self.personality_traits = (traits + "; " + new_trait)[-MAX_TRAIT_LENGTH:]
+            if new_trait and len(new_trait) < 60:
+                self.global_traits = (current_traits + "; " + new_trait)[-MAX_TRAIT_LENGTH:]
 
-            delta = max(-5, min(5, int(parsed["reputation_delta"])))
-            self.reputation = u64(max(0, min(100, current_rep + delta)))
+            delta   = max(-5, min(5, int(parsed["reputation_delta"])))
+            new_rep = max(0, min(100, current_rep + delta))
 
-            self.memories.append(str(parsed["memory"]))
+            topics["_last_emotion"] = topics.get("_emotion", "neutral")
+            topics["_emotion"]      = str(parsed.get("emotion_detected", "neutral"))
+
+            memories.append(str(parsed["memory"]))
+            memories = _trim_list(memories, MAX_MEMORY_ENTRIES)
 
             insight = str(parsed["knowledge_insight"]).strip()
             if insight and len(insight) > 10:
-                self.knowledge_base.append(insight)
+                k_idx = "k" + str(int(self.insight_count) % MAX_KNOWLEDGE_ENTRIES)
+                self.knowledge_base[k_idx] = insight
                 self.insight_count = u64(int(self.insight_count) + 1)
 
-            exp_delta = 2 if intent == "question" else 1
             self.expertise_score = u64(
-                min(100, int(self.expertise_score) + exp_delta)
+                min(100, int(self.expertise_score) + (2 if intent == "question" else 1))
             )
 
-            self.conversation_history.append("User: " + message)
-            self.conversation_history.append("Josepha: " + self.last_reply)
+            history.append("User: " + message)
+            history.append("Josepha: " + new_reply)
+            history = _trim_list(history, MAX_HISTORY_ENTRIES)
 
-        except Exception as e:
-            self.last_reply = "I'm having trouble processing that right now. Could you rephrase?"
-        # ─────────────────────────────────────────────────────────────
+            self._save_user_state(addr, {
+                "reply":    new_reply,
+                "history":  history,
+                "memories": memories,
+                "mood":     new_mood,
+                "level":    detected_level,
+                "rep":      new_rep,
+                "topics":   topics,
+                "intent":   intent,
+            })
 
-        self.interaction_count += 1
+        except Exception:
+            self.replies[addr] = "I am having trouble processing that. Could you rephrase?"
+
+        self.interaction_count = u64(int(self.interaction_count) + 1)
 
     @gl.public.write
-    def reset_personality(self, new_traits: str) -> None:
-        self.personality_traits = new_traits
-        self.mood = "neutral"
-
-    @gl.public.write
-    def reset_reputation(self, value: u64) -> None:
-        self.reputation = u64(max(0, min(100, int(value))))
-
-    @gl.public.view
-    def get_reply(self) -> str:
-        return self.last_reply
+    def reset_user(self, addr: str) -> None:
+        if addr in self.replies:       self.replies[addr]       = ""
+        if addr in self.histories:     self.histories[addr]     = "[]"
+        if addr in self.user_memories: self.user_memories[addr] = "[]"
+        if addr in self.user_moods:    self.user_moods[addr]    = "neutral"
+        if addr in self.user_levels:   self.user_levels[addr]   = "intermediate"
+        if addr in self.user_reps:     self.user_reps[addr]     = "50"
+        if addr in self.user_topics:   self.user_topics[addr]   = "{}"
+        if addr in self.user_intents:  self.user_intents[addr]  = "greeting"
 
     @gl.public.view
-    def get_personality(self) -> str:
-        return self.personality_traits
+    def get_reply(self, addr: str) -> str:
+        return self.replies[addr] if addr in self.replies else ""
 
     @gl.public.view
-    def get_mood(self) -> str:
-        return self.mood
+    def get_mood(self, addr: str) -> str:
+        return self.user_moods[addr] if addr in self.user_moods else "neutral"
 
     @gl.public.view
-    def get_reputation(self) -> u64:
-        return self.reputation
+    def get_level(self, addr: str) -> str:
+        return self.user_levels[addr] if addr in self.user_levels else "intermediate"
 
     @gl.public.view
-    def get_interaction_count(self) -> u64:
-        return self.interaction_count
+    def get_reputation(self, addr: str) -> int:
+        return int(self.user_reps[addr]) if addr in self.user_reps else 50
 
     @gl.public.view
-    def get_expertise_score(self) -> u64:
-        return self.expertise_score
+    def get_intent(self, addr: str) -> str:
+        return self.user_intents[addr] if addr in self.user_intents else "greeting"
 
     @gl.public.view
-    def get_insight_count(self) -> u64:
-        return self.insight_count
+    def get_topics(self, addr: str) -> str:
+        return self.user_topics[addr] if addr in self.user_topics else "{}"
 
     @gl.public.view
-    def get_frequent_topics(self) -> str:
-        return self.frequent_topics
+    def get_memories(self, addr: str) -> str:
+        return self.user_memories[addr] if addr in self.user_memories else "[]"
 
     @gl.public.view
-    def get_knowledge_base(self) -> str:
-        count = len(self.knowledge_base)
-        return json.dumps(
-            [self.knowledge_base[i] for i in range(count)]
-        )
+    def get_history(self, addr: str) -> str:
+        return self.histories[addr] if addr in self.histories else "[]"
 
     @gl.public.view
-    def get_user_level(self) -> str:
-        return self.user_level
+    def get_interaction_count(self) -> int:
+        return int(self.interaction_count)
 
     @gl.public.view
-    def get_last_intent(self) -> str:
-        return self.last_intent
+    def get_expertise_score(self) -> int:
+        return int(self.expertise_score)
 
     @gl.public.view
-    def get_memory(self, index: int) -> str:
-        if index < 0 or index >= len(self.memories):
-            return ""
-        return self.memories[index]
+    def get_insight_count(self) -> int:
+        return int(self.insight_count)
 
     @gl.public.view
-    def get_all_memories(self) -> str:
-        count = len(self.memories)
-        return json.dumps([self.memories[i] for i in range(count)])
-
-    @gl.public.view
-    def get_conversation_history(self) -> str:
-        count = len(self.conversation_history)
-        return json.dumps(
-            [self.conversation_history[i] for i in range(count)]
-        )
-
-    @gl.public.view
-    def get_full_state(self) -> str:
-        mem_count = len(self.memories)
-        hist_count = len(self.conversation_history)
-        k_count = len(self.knowledge_base)
+    def get_full_state(self, addr: str) -> str:
+        state = self._get_user_state(addr)
         return json.dumps({
-            "name": self.name,
-            "mood": self.mood,
-            "reputation": int(self.reputation),
+            "address":           addr,
+            "reply":             state["reply"],
+            "mood":              state["mood"],
+            "level":             state["level"],
+            "reputation":        state["rep"],
+            "intent":            state["intent"],
+            "topics":            state["topics"],
+            "memories":          state["memories"],
+            "history":           state["history"],
+            "global_traits":     self.global_traits,
             "interaction_count": int(self.interaction_count),
-            "expertise_score": int(self.expertise_score),
-            "insight_count": int(self.insight_count),
-            "frequent_topics": self.frequent_topics,
-            "personality_traits": self.personality_traits,
-            "user_level": self.user_level,
-            "last_intent": self.last_intent,
-            "last_reply": self.last_reply,
-            "memories": [self.memories[i] for i in range(mem_count)],
-            "knowledge_base": [self.knowledge_base[i] for i in range(k_count)],
-            "conversation_history": [
-                self.conversation_history[i] for i in range(hist_count)
-            ]
+            "expertise_score":   int(self.expertise_score),
+            "insight_count":     int(self.insight_count),
         })
