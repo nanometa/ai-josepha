@@ -8,7 +8,7 @@ import { TransactionStatus } from 'genlayer-js/types';
 // ── Contract address from environment ──
 const getContractAddress = (): `0x${string}` => {
   const envAddr = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
-  const fallback = '0x08ce97aFcd8e37E486389Cc25ef0f65f59F55a5d';
+  const fallback = '0x61b25b67bFD1A65962C4000733dc5311b242f010';
   
   if (!envAddr || envAddr === 'undefined' || !envAddr.startsWith('0x')) {
     return fallback as `0x${string}`;
@@ -18,7 +18,7 @@ const getContractAddress = (): `0x${string}` => {
 
 const CONTRACT_ADDRESS = getContractAddress();
 
-const CONTRACT_VERSION = 'v15'; // Force cache clear for new contract address
+const CONTRACT_VERSION = 'v16'; // Force cache clear for new contract address
 
 
 export interface ChatMessage {

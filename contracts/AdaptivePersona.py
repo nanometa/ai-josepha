@@ -322,19 +322,8 @@ class AdaptivePersona(gl.Contract):
             p += '"follow_up":"<question or empty string>"}'
             return gl.nondet.exec_prompt(p)
 
-        principle = (
-            "Both outputs represent Josepha responding to the same user message. "
-            "They must agree on: "
-            "1) Same language as the user input. "
-            "2) Same core information and facts. "
-            "3) Same mood and reputation_delta within +-1. "
-            "4) Same confidence within +-10. "
-            "5) reply length within +-1 sentence. "
-            "Minor wording differences are acceptable."
-        )
-
         try:
-            raw    = gl.eq_principle.prompt_comparative(respond, principle)
+            raw    = gl.eq_principle.strict_eq(respond)
             parsed = parse_fn(raw if isinstance(raw, str) else str(raw))
 
             if not parsed:
